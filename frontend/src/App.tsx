@@ -2,7 +2,7 @@
  * App — top-level component with routing and step indicator.
  */
 
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Link } from "react-router-dom";
 import { UploadPage } from "./pages/UploadPage";
 import { ProcessingPage } from "./pages/ProcessingPage";
 import { EditPage } from "./pages/EditPage";
@@ -43,10 +43,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="app">
-        <header className="app-header">
-          <h1>📋 Cowell OCR</h1>
-          <p>手書き調査シート → Google Spreadsheet</p>
-        </header>
+        <Link to="/" style={{ textDecoration: "none", color: "inherit" }}>
+          <header className="app-header">
+            <h1>📋 Cowell OCR</h1>
+            <p>手書き調査シート → Google Spreadsheet</p>
+          </header>
+        </Link>
 
         <StepIndicator />
 
