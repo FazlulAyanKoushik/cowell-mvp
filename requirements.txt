@@ -1,2 +1,4 @@
+# Cowell OCR MVP — see backend/pyproject.toml for full deps
+# Install backend with: cd backend && uv sync
 tqdm
 python-dotenv

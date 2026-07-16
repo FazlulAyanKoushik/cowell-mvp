@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Flash OCR プロトタイプ</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: #1a1a2e;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .card h2 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #888;
+      margin-bottom: 12px;
+    }
+
+    /* API Key */
+    .api-key-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .api-key-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .api-key-row input:focus { border-color: #4f8ef7; }
+
+    .toggle-btn {
+      padding: 10px 16px;
+      background: #f5f5f5;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: #555;
+      white-space: nowrap;
+    }
+
+    .toggle-btn:hover { background: #eee; }
+
+    /* Upload area */
+    .upload-area {
+      border: 2px dashed #c8d0e0;
+      border-radius: 10px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .upload-area:hover, .upload-area.drag-over {
+      border-color: #4f8ef7;
+      background: #f5f9ff;
+    }
+
+    .upload-area input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .upload-icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+    .upload-area p { color: #888; font-size: 0.95rem; }
+    .upload-area p strong { color: #4f8ef7; }
+
+    /* Preview */
+    #preview-wrap {
+      display: none;
+      margin-top: 16px;
+      text-align: center;
+    }
+
+    #preview-wrap img {
+      max-width: 100%;
+      max-height: 360px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+
+    #preview-wrap iframe {
+      width: 100%;
+      height: 420px;
+      border-radius: 8px;
+      border: 1.5px solid #e0e0e0;
+    }
+
+    #file-name {
+      margin-top: 8px;
+      font-size: 0.82rem;
+      color: #aaa;
+    }
+
+    /* Prompt */
+    #prompt {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+      resize: vertical;
+      min-height: 72px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    #prompt:focus { border-color: #4f8ef7; }
+
+    /* Run button */
+    #run-btn {
+      width: 100%;
+      padding: 14px;
+      background: #4f8ef7;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+
+    #run-btn:hover:not(:disabled) { background: #3a7ae0; }
+    #run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Result */
+    #result-wrap { display: none; }
+
+    #result-meta {
+      font-size: 0.8rem;
+      color: #aaa;
+      margin-bottom: 12px;
+    }
+
+    .tab-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .tab-btn {
+      padding: 6px 16px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 6px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 0.83rem;
+      color: #666;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .tab-btn.active {
+      background: #4f8ef7;
+      border-color: #4f8ef7;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    /* Rendered markdown */
+    #result-rendered {
+      background: #fafafa;
+      border: 1.5px solid #e8e8e8;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      min-height: 80px;
+      overflow-x: auto;
+    }
+
+    #result-rendered table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 0.9rem;
+    }
+
+    #result-rendered th, #result-rendered td {
+      border: 1px solid #d0d0d0;
+      padding: 8px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    #result-rendered th {
+      background: #f0f4ff;
+      font-weight: 600;
+      color: #334;
+    }
+
+    #result-rendered tr:nth-child(even) td { background: #f9f9f9; }
+    #result-rendered tr:hover td { background: #eef3ff; }
+
+    /* Raw text */
+    #result-raw {
+      display: none;
+      background: #fafafa;
+      border: 1.5px solid #e8e8e8;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 0.88rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 80px;
+      font-family: 'Courier New', monospace;
+      color: #555;
+    }
+
+    .result-actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+
+    #copy-btn {
+      padding: 8px 18px;
+      background: #f0f0f0;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: #555;
+    }
+
+    #copy-btn:hover { background: #e6e6e6; }
+
+    /* Quality selector */
+    .quality-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      font-size: 0.88rem;
+      color: #666;
+    }
+
+    .quality-row select {
+      padding: 7px 10px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      outline: none;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .quality-row select:focus { border-color: #4f8ef7; }
+
+    /* Upload info */
+    #upload-info {
+      font-size: 0.8rem;
+      color: #999;
+      margin-bottom: 8px;
+      min-height: 1.1em;
+      text-align: center;
+    }
+
+    /* Cost badge */
+    #cost-display {
+      display: inline-block;
+      background: #f0f7ee;
+      border: 1px solid #b8ddb0;
+      color: #276018;
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    /* File list */
+    .file-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: #f9f9f9;
+      border: 1px solid #ebebeb;
+      border-radius: 8px;
+    }
+
+    .file-thumb {
+      width: 52px;
+      height: 52px;
+      object-fit: cover;
+      border-radius: 5px;
+      flex-shrink: 0;
+      background: #eee;
+    }
+
+    .pdf-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 5px;
+      flex-shrink: 0;
+      background: #e8eeff;
+      color: #4f8ef7;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .file-info { flex: 1; min-width: 0; }
+
+    .file-item-name {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-item-size { font-size: 0.78rem; color: #aaa; }
+
+    .file-remove {
+      padding: 4px 8px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #ccc;
+      font-size: 1rem;
+      border-radius: 4px;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .file-remove:hover { background: #fee; color: #e44; }
+
+    /* Status */
+    #status {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    #status.loading {
+      background: #e8f0fe;
+      color: #2d5fc1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #status.error {
+      background: #fdecea;
+      color: #c0392b;
+      display: block;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 3px solid #b0c8f8;
+      border-top-color: #4f8ef7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Gemini Flash OCR プロトタイプ</h1>
+
+  <!-- API Key -->
+  <div class="card">
+    <h2>API キー</h2>
+    <div class="api-key-row">
+      <input type="password" id="api-key" placeholder="AIza..." autocomplete="off">
+      <button class="toggle-btn" onclick="toggleKey()">表示</button>
+    </div>
+  </div>
+
+  <!-- Image Upload -->
+  <div class="card">
+    <h2>画像</h2>
+    <div class="upload-area" id="upload-area">
+      <input type="file" id="file-input" accept="image/*,application/pdf" multiple>
+      <div class="upload-icon">🖼️</div>
+      <p><strong>クリックまたはドラッグ</strong>してファイルを選択（複数可）</p>
+      <p style="font-size:0.8rem; margin-top:6px;">PNG / JPG / WEBP / GIF / PDF</p>
+    </div>
+    <div class="quality-row">
+      <label for="quality-select">画質:</label>
+      <select id="quality-select" onchange="onQualityChange()">
+        <option value="minimal">最軽量  640px / 68%  (モバイル推奨)</option>
+        <option value="light">軽量     800px / 75%</option>
+        <option value="standard" selected>標準    1024px / 82%</option>
+        <option value="high">高品質  1400px / 90%</option>
+      </select>
+    </div>
+    <div id="preview-wrap" style="display:none;"></div>
+  </div>
+
+  <!-- Prompt -->
+  <div class="card">
+    <h2>プロンプト</h2>
+    <textarea id="prompt">画像内の表をTSV形式（タブ区切り、1行目はヘッダー）で出力してください。表が複数ある場合は空行で区切ってください。表以外のテキストはそのまま出力してください。</textarea>
+  </div>
+
+  <!-- Run -->
+  <div id="status"></div>
+  <div id="upload-info"></div>
+  <button id="run-btn" onclick="runOCR()" disabled>画像を選択してください</button>
+
+  <!-- Result -->
+  <div class="card" id="result-wrap" style="margin-top:20px;">
+    <h2>OCR 結果</h2>
+    <div id="result-meta"></div>
+    <div id="cost-display" style="display:none;"></div>
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-rendered" onclick="switchTab('rendered')">表示</button>
+      <button class="tab-btn" id="tab-raw" onclick="switchTab('raw')">RAW</button>
+    </div>
+    <div id="result-rendered"></div>
+    <div id="result-raw"></div>
+    <div class="result-actions">
+      <button id="copy-btn" onclick="copyResult()">コピー</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Gemini 3.5 Flash 正式料金
+  const PRICE_IN_PER_1M  = 1.50;  // USD / 1M input tokens
+  const PRICE_OUT_PER_1M = 9.00;  // USD / 1M output tokens (thinking tokens 含む)
+  const USD_TO_JPY = 155;
+
+  const QUALITY_PRESETS = {
+    minimal:  { maxPx: 640,  quality: 0.68 },
+    light:    { maxPx: 800,  quality: 0.75 },
+    standard: { maxPx: 1024, quality: 0.82 },
+    high:     { maxPx: 1400, quality: 0.90 },
+  };
+
+  let imageFiles = []; // [{base64, mimeType, name, originalKB, compressedKB, width, height, previewUrl}]
+  let rawMarkdown = '';
+
+  function switchTab(tab) {
+    const isRendered = tab === 'rendered';
+    document.getElementById('result-rendered').style.display = isRendered ? 'block' : 'none';
+    document.getElementById('result-raw').style.display       = isRendered ? 'none'  : 'block';
+    document.getElementById('tab-rendered').classList.toggle('active',  isRendered);
+    document.getElementById('tab-raw').classList.toggle('active', !isRendered);
+  }
+
+  const fileInput = document.getElementById('file-input');
+  const uploadArea = document.getElementById('upload-area');
+  const runBtn = document.getElementById('run-btn');
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files.length) loadFiles(e.target.files);
+  });
+
+  uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+  uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+  uploadArea.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadArea.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+  });
+
+  function onQualityChange() {
+    if (imageFiles.length) {
+      // 再圧縮のため元ファイルを保持していないので、ユーザーに再選択を促す
+      document.getElementById('upload-info').textContent = '画質を変更しました。ファイルを再選択してください。';
+    }
+  }
+
+  async function loadFiles(fileList) {
+    const valid = Array.from(fileList).filter(f =>
+      f.type.startsWith('image/') || f.type === 'application/pdf'
+    );
+    if (!valid.length) return;
+
+    runBtn.disabled = true;
+    runBtn.textContent = '読み込み中...';
+    hideStatus();
+
+    const preset = QUALITY_PRESETS[document.getElementById('quality-select').value];
+    const newEntries = [];
+
+    for (const file of valid) {
+      if (file.size > 20 * 1024 * 1024) {
+        showError(`${file.name} が 20MB を超えています`);
+        continue;
+      }
+      const dataUrl = await readAsDataURL(file);
+      const originalKB = (file.size / 1024).toFixed(1);
+
+      if (file.type === 'application/pdf') {
+        newEntries.push({
+          base64: dataUrl.split(',')[1],
+          mimeType: 'application/pdf',
+          name: file.name,
+          originalKB,
+          compressedKB: originalKB,
+          previewUrl: null,
+        });
+      } else {
+        const { dataUrl: compressed, width, height } = await compressImage(dataUrl, preset);
+        const compressedKB = Math.round(compressed.length * 0.75 / 1024);
+        newEntries.push({
+          base64: compressed.split(',')[1],
+          mimeType: 'image/jpeg',
+          name: file.name,
+          originalKB,
+          compressedKB,
+          width,
+          height,
+          previewUrl: compressed,
+        });
+      }
+    }
+
+    imageFiles = [...imageFiles, ...newEntries];
+    renderFileList();
+    updateUploadInfo();
+    document.getElementById('result-wrap').style.display = 'none';
+    runBtn.disabled = false;
+    runBtn.textContent = imageFiles.length > 1 ? `${imageFiles.length} 枚を OCR 実行` : 'OCR を実行';
+  }
+
+  function readAsDataURL(file) {
+    return new Promise(resolve => {
+      const r = new FileReader();
+      r.onload = e => resolve(e.target.result);
+      r.readAsDataURL(file);
+    });
+  }
+
+  function renderFileList() {
+    const wrap = document.getElementById('preview-wrap');
+    if (!imageFiles.length) { wrap.style.display = 'none'; return; }
+
+    wrap.innerHTML = '<div class="file-list">' + imageFiles.map((f, i) => `
+      <div class="file-item">
+        ${f.previewUrl
+          ? `<img src="${f.previewUrl}" class="file-thumb" alt="">`
+          : `<div class="pdf-icon">PDF</div>`}
+        <div class="file-info">
+          <span class="file-item-name">${esc(f.name)}</span>
+          <span class="file-item-size">${f.originalKB} KB → ${f.compressedKB} KB${f.width ? `  ${f.width}×${f.height}px` : ''}</span>
+        </div>
+        <button class="file-remove" onclick="removeFile(${i})">✕</button>
+      </div>`).join('') + '</div>';
+    wrap.style.display = 'block';
+  }
+
+  function removeFile(index) {
+    imageFiles.splice(index, 1);
+    renderFileList();
+    updateUploadInfo();
+    if (!imageFiles.length) {
+      runBtn.disabled = true;
+      runBtn.textContent = '画像を選択してください';
+      document.getElementById('upload-info').textContent = '';
+    } else {
+      runBtn.textContent = imageFiles.length > 1 ? `${imageFiles.length} 枚を OCR 実行` : 'OCR を実行';
+    }
+  }
+
+  function updateUploadInfo() {
+    if (!imageFiles.length) return;
+    const totalKB = imageFiles.reduce((sum, f) => sum + Math.round(f.base64.length * 0.75 / 1024), 0);
+    document.getElementById('upload-info').textContent =
+      `送信データ: 約 ${totalKB} KB（${imageFiles.length} ファイル）`;
+  }
+
+  function compressImage(dataUrl, preset) {
+    const { maxPx, quality } = preset;
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxPx || h > maxPx) {
+          if (w >= h) { h = Math.round(h * maxPx / w); w = maxPx; }
+          else        { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), width: w, height: h });
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  function toggleKey() {
+    const input = document.getElementById('api-key');
+    const btn = event.target;
+    if (input.type === 'password') {
+      input.type = 'text';
+      btn.textContent = '隠す';
+    } else {
+      input.type = 'password';
+      btn.textContent = '表示';
+    }
+  }
+
+  async function runOCR() {
+    const apiKey = document.getElementById('api-key').value.trim();
+    const prompt = document.getElementById('prompt').value.trim();
+
+    if (!apiKey) { showError('API キーを入力してください。'); return; }
+    if (!imageFiles.length) { showError('画像を選択してください。'); return; }
+
+    runBtn.disabled = true;
+    document.getElementById('result-wrap').style.display = 'none';
+
+    const t0 = Date.now();
+    showLoading('Gemini Flash に送信中...  0.0s');
+    const timer = setInterval(() => {
+      const s = ((Date.now() - t0) / 1000).toFixed(1);
+      showLoading(`Gemini Flash に送信中...  ${s}s`);
+    }, 100);
+
+    const parts = [{ text: prompt }];
+    imageFiles.forEach(f => parts.push({ inline_data: { mime_type: f.mimeType, data: f.base64 } }));
+
+    const body = {
+      contents: [{ parts }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 32768,
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    };
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        clearInterval(timer);
+        const msg = data?.error?.message || `HTTP ${res.status}`;
+        showError(`API エラー: ${msg}`);
+        runBtn.disabled = false;
+        return;
+      }
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+      const candidate = data?.candidates?.[0];
+      const text = candidate?.content?.parts?.[0]?.text ?? '(テキストなし)';
+      const finishReason = candidate?.finishReason ?? '';
+      const usage = data?.usageMetadata ?? {};
+      const tokIn  = usage.promptTokenCount ?? '—';
+      const tokOut = usage.candidatesTokenCount ?? '—';
+      const tokTotal = usage.totalTokenCount ?? '—';
+
+      const costUSD = (Number(tokIn)  / 1e6 * PRICE_IN_PER_1M)
+                    + (Number(tokOut) / 1e6 * PRICE_OUT_PER_1M);
+      const costJPY = costUSD * USD_TO_JPY;
+
+      clearInterval(timer);
+      rawMarkdown = text;
+      if (finishReason === 'MAX_TOKENS') {
+        showError('⚠️ 出力がトークン上限に達したため途中で切れた可能性があります（finishReason: MAX_TOKENS）');
+      } else {
+        hideStatus();
+      }
+      document.getElementById('result-meta').textContent =
+        `処理時間: ${elapsed}s　／　入力: ${tokIn} tok　出力: ${tokOut} tok　合計: ${tokTotal} tok`;
+
+      const costEl = document.getElementById('cost-display');
+      costEl.textContent = isNaN(costUSD)
+        ? '推定料金: — (トークン情報なし)'
+        : `推定料金: $${costUSD.toFixed(5)}  ≈  ${costJPY.toFixed(3)} 円`;
+      costEl.style.display = 'inline-block';
+      document.getElementById('result-rendered').innerHTML = renderTSV(text);
+      document.getElementById('result-raw').textContent = text;
+      switchTab('rendered');
+      document.getElementById('result-wrap').style.display = 'block';
+
+    } catch (err) {
+      clearInterval(timer);
+      showError(`通信エラー: ${err.message}`);
+    }
+
+    runBtn.disabled = false;
+    runBtn.textContent = imageFiles.length > 1 ? `${imageFiles.length} 枚を再実行` : '再実行';
+  }
+
+  // TSV → HTML テーブル変換（タブ文字が含まれるブロックを表として描画）
+  function renderTSV(text) {
+    const blocks = [];
+    let current = [];
+    for (const line of text.split('\n')) {
+      if (line.trim() === '') {
+        if (current.length) { blocks.push(current); current = []; }
+      } else {
+        current.push(line);
+      }
+    }
+    if (current.length) blocks.push(current);
+
+    return blocks.map(block => {
+      const isTable = block.length >= 2 && block.filter(l => l.includes('\t')).length >= block.length * 0.8;
+      if (isTable) {
+        const rows = block.map(l => l.split('\t'));
+        const maxCols = Math.max(...rows.map(r => r.length));
+        let html = '<div style="overflow-x:auto"><table><thead><tr>';
+        rows[0].forEach(cell => html += `<th>${esc(cell.trim())}</th>`);
+        // 列数が少ない場合は空セルで埋める
+        for (let i = rows[0].length; i < maxCols; i++) html += '<th></th>';
+        html += '</tr></thead><tbody>';
+        rows.slice(1).forEach(row => {
+          html += '<tr>';
+          for (let i = 0; i < maxCols; i++) html += `<td>${esc((row[i] ?? '').trim())}</td>`;
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+      }
+      return `<p style="white-space:pre-wrap;margin:8px 0">${block.map(esc).join('\n')}</p>`;
+    }).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function copyResult() {
+    navigator.clipboard.writeText(rawMarkdown).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = 'コピー完了!';
+      setTimeout(() => btn.textContent = 'コピー', 1500);
+    });
+  }
+
+  function showLoading(msg) {
+    const s = document.getElementById('status');
+    s.className = 'loading';
+    s.innerHTML = `<div class="spinner"></div><span>${msg}</span>`;
+    s.style.display = 'flex';
+  }
+
+  function showError(msg) {
+    const s = document.getElementById('status');
+    s.className = 'error';
+    s.textContent = '⚠️ ' + msg;
+    s.style.display = 'block';
+  }
+
+  function hideStatus() {
+    document.getElementById('status').style.display = 'none';
+  }
+</script>
+</body>
+</html>
