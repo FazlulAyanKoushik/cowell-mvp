@@ -13,12 +13,12 @@ def _default_upload_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "uploads"
 
 
-def _default_sa_path() -> str:
-    """Pick service account path: Docker path or local ./credentials/."""
-    docker_path = "/app/credentials/service_account.json"
+def _default_token_path() -> str:
+    """Pick OAuth token path: Docker path or local ./credentials/."""
+    docker_path = "/app/credentials/token.json"
     if Path(docker_path).exists():
         return docker_path
-    local = Path(__file__).resolve().parent.parent / "credentials" / "service_account.json"
+    local = Path(__file__).resolve().parent.parent / "credentials" / "token.json"
     return str(local)
 
 
@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     """App settings loaded from environment / .env file."""
 
     gemini_api_key: str = ""
-    google_service_account_path: str = ""
+    google_oauth_token_path: str = ""
+    # Folder in your Drive where new Sheets will be created.
+    # Get this from the folder URL: drive.google.com/drive/folders/<THIS>
+    google_oauth_target_folder_id: str = ""
 
     # Image processing
     max_image_dimension: int = 1200
@@ -41,14 +44,14 @@ class Settings(BaseSettings):
     # Upload directory (for temp file storage)
     upload_dir: Path = Path(".")
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
 
 # Apply smart defaults (must come after Settings() construction)
-if not settings.google_service_account_path:
-    settings.google_service_account_path = _default_sa_path()
+if not settings.google_oauth_token_path:
+    settings.google_oauth_token_path = _default_token_path()
 if settings.upload_dir == Path("."):
     settings.upload_dir = _default_upload_dir()
 

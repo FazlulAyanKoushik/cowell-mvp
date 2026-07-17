@@ -63,13 +63,14 @@ async def register_to_sheet(session_id: str):
 
     except FileNotFoundError as e:
         session.status = SessionStatus.ERROR
-        session.error_message = f"Google credentials not found: {e}"
+        session.error_message = f"OAuth token not found: {e}"
         update_session(session)
         raise HTTPException(
             status_code=500,
             detail=(
-                "Google service account not configured. "
-                "Place service_account.json in backend/credentials/ and restart. "
+                "Google OAuth token not found. "
+                "Run `python auth_oauth.py` from the backend directory to "
+                "authorize your Google account, then restart the server. "
                 f"Error: {e}"
             ),
         ) from e

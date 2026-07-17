@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -20,17 +21,33 @@ SCOPES = [
 ]
 
 
-def _get_credentials():
-    """Load service account credentials."""
-    sa_path = settings.google_service_account_path
-    if not Path(sa_path).exists():
+def _get_credentials() -> Credentials:
+    """Load OAuth 2.0 user credentials from the saved token file.
+
+    The token file is created once by `python auth_oauth.py` and contains
+    a refresh token that auto-refreshes the access token when expired.
+
+    Returns:
+        google.oauth2.credentials.Credentials
+    """
+    token_path = settings.google_oauth_token_path
+    if not Path(token_path).exists():
         raise FileNotFoundError(
-            f"Service account file not found: {sa_path}\n"
-            "Download it from Google Cloud Console and place it at the configured path."
+            f"OAuth token not found: {token_path}\n"
+            "Run `python auth_oauth.py` once to authorize your Google account.\n"
+            "It will open a browser for you to log in and save token.json."
         )
-    return service_account.Credentials.from_service_account_file(
-        sa_path, scopes=SCOPES
-    )
+
+    creds = Credentials.from_authorized_user_file(token_path, scopes=SCOPES)
+
+    # Auto-refresh if expired
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        # Persist refreshed token so we don't refresh on every request
+        Path(token_path).write_text(creds.to_json())
+        logger.info("Refreshed OAuth access token and saved to %s", token_path)
+
+    return creds
 
 
 def _get_drive_service():
@@ -39,21 +56,28 @@ def _get_drive_service():
     return build("drive", "v3", credentials=creds)
 
 
-def upload_photo(file_path: str, filename: str) -> str:
+def upload_photo(file_path: str, filename: str, folder_id: str | None = None) -> str:
     """Upload a photo to Google Drive and return the file ID.
 
     The file is made publicly viewable so it can be referenced
     via IMAGE() formula in Google Sheets.
+
+    Args:
+        file_path: Local path to the photo file.
+        filename: Display name in Drive.
+        folder_id: If set, places the photo inside this Drive folder.
+                   If ``None``, uploads to the root of My Drive.
 
     Returns empty string on failure (quota exceeded, etc.) so
     the sheet creation can continue without photos.
     """
     service = _get_drive_service()
 
-    file_metadata = {
+    file_metadata: dict[str, object] = {
         "name": filename,
-        "parents": [],  # Root of service account's Drive
     }
+    if folder_id:
+        file_metadata["parents"] = [folder_id]
 
     media = MediaFileUpload(
         file_path,

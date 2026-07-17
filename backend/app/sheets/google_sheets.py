@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import gspread
+from googleapiclient.discovery import build
 
 from ..config import settings
 from ..models import SurveyRow, SURVEY_COLUMNS
@@ -13,11 +15,46 @@ from .google_drive import _get_credentials, upload_photo, get_photo_url
 
 logger = logging.getLogger(__name__)
 
+# MIME type for Google Sheets
+SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+
 
 def _get_gspread_client() -> gspread.Client:
-    """Create a gspread client from service account credentials."""
+    """Create a gspread client from OAuth user credentials."""
     creds = _get_credentials()
     return gspread.authorize(creds)
+
+
+def _create_sheet_via_drive_api(name: str, folder_id: str | None) -> tuple[str, str]:
+    """Create a Google Sheet using the Drive API so it lands in the target folder.
+
+    gspread's ``folder_id`` parameter is unreliable across versions — the Drive
+    API ``parents`` + ``mimeType`` approach is bulletproof.
+
+    Args:
+        name: Display name for the spreadsheet.
+        folder_id: ID of the Drive folder to create the sheet in, or ``None``
+                   for root.
+
+    Returns:
+        Tuple of (sheet_id, sheet_url).
+    """
+    creds = _get_credentials()
+    drive = build("drive", "v3", credentials=creds)
+
+    file_metadata: dict = {
+        "name": name,
+        "mimeType": SHEETS_MIME_TYPE,
+    }
+    if folder_id:
+        file_metadata["parents"] = [folder_id]
+
+    drive_file = (
+        drive.files()
+        .create(body=file_metadata, fields="id,webViewLink")
+        .execute()
+    )
+    return drive_file["id"], drive_file["webViewLink"]
 
 
 def create_and_populate_sheet(
@@ -42,14 +79,17 @@ def create_and_populate_sheet(
     """
     gc = _get_gspread_client()
 
-    # Create the spreadsheet
+    # Create the spreadsheet via Drive API (reliably places it in the target folder)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     sheet_name = f"Cowell OCR - {session_id[:8]} - {timestamp}"
-    spreadsheet = gc.create(sheet_name)
+    folder_id = settings.google_oauth_target_folder_id or None
+
+    sheet_id, sheet_url = _create_sheet_via_drive_api(sheet_name, folder_id)
+    spreadsheet = gc.open_by_key(sheet_id)
     worksheet = spreadsheet.sheet1
     worksheet.update_title("調査データ")
 
-    logger.info("Created Google Sheet: %s", sheet_name)
+    logger.info("Created Google Sheet: %s  [folder=%s]", sheet_name, folder_id or "root")
 
     # Build header row
     headers = [col[1] for col in SURVEY_COLUMNS]  # Japanese column names
@@ -58,10 +98,10 @@ def create_and_populate_sheet(
     data_rows = []
     photo_id_map = {}  # local_path → drive_file_id
 
-    # Upload photos first
+    # Upload photos into the same target folder (if configured)
     for photo_path in photo_files:
         try:
-            file_id = upload_photo(photo_path, Path(photo_path).name)
+            file_id = upload_photo(photo_path, Path(photo_path).name, folder_id=folder_id)
             photo_id_map[photo_path] = file_id
         except Exception as e:
             logger.warning("Failed to upload photo %s: %s", photo_path, e)
@@ -92,7 +132,7 @@ def create_and_populate_sheet(
 
     # Write data to sheet
     all_data = [headers] + data_rows
-    worksheet.update("A1", all_data)
+    worksheet.update(values=all_data, range_name="A1")
 
     # Format header row (bold)
     worksheet.format("A1:G1", {
@@ -103,15 +143,53 @@ def create_and_populate_sheet(
     # Auto-resize columns (approximate)
     worksheet.columns_auto_resize(0, len(headers) - 1)
 
-    # Set column widths for readability
+    # Set column widths and row heights via batch_update
+    # (gspread 6.x dropped update_column_width / update_row_height in favour of
+    # raw batchUpdate requests, which is the only way to set pixel sizes.)
     col_widths = [80, 150, 160, 250, 100, 60, 200]  # pixels
-    for i, width in enumerate(col_widths):
-        worksheet.update_column_width(i, width)
-
-    # Set row heights for photo rows
-    worksheet.update_row_height(1, 30)  # Header row
-    for i in range(2, len(all_data) + 1):
-        worksheet.update_row_height(i, 50)  # Data rows (room for photo thumbnails)
+    dimension_requests = [
+        {
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": worksheet.id,
+                    "dimension": "COLUMNS",
+                    "startIndex": i,
+                    "endIndex": i + 1,
+                },
+                "properties": {"pixelSize": width},
+                "fields": "pixelSize",
+            }
+        }
+        for i, width in enumerate(col_widths)
+    ]
+    # Row heights: header 30, data 50
+    dimension_requests.append({
+        "updateDimensionProperties": {
+            "range": {
+                "sheetId": worksheet.id,
+                "dimension": "ROWS",
+                "startIndex": 0,
+                "endIndex": 1,
+            },
+            "properties": {"pixelSize": 30},
+            "fields": "pixelSize",
+        }
+    })
+    if len(all_data) >= 2:
+        dimension_requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": worksheet.id,
+                    "dimension": "ROWS",
+                    "startIndex": 1,
+                    "endIndex": len(all_data),
+                },
+                "properties": {"pixelSize": 50},
+                "fields": "pixelSize",
+            }
+        })
+    if dimension_requests:
+        spreadsheet.batch_update({"requests": dimension_requests})
 
     sheet_url = spreadsheet.url
     logger.info("Sheet populated with %d rows: %s", len(rows), sheet_url)

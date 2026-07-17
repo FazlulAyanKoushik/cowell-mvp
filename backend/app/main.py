@@ -49,9 +49,10 @@ def startup_log():
     logger.info("Cowell OCR API starting up")
     logger.info("  Gemini model:    %s", settings.gemini_model)
     logger.info("  Upload dir:      %s", settings.upload_dir)
-    logger.info("  SA path:         %s", settings.google_service_account_path)
+    logger.info("  OAuth token:     %s", settings.google_oauth_token_path)
+    logger.info("  Target folder:   %s", settings.google_oauth_target_folder_id or "(root of My Drive)")
     logger.info("  Gemini API key:  %s", "SET" if settings.gemini_api_key else "MISSING ⚠️")
     from pathlib import Path
-    sa_exists = Path(settings.google_service_account_path).exists()
-    logger.info("  SA file exists:  %s", "YES ✅" if sa_exists else "NO ❌")
+    token_exists = Path(settings.google_oauth_token_path).exists()
+    logger.info("  Token exists:    %s", "YES ✅" if token_exists else "NO ❌ (run `python auth_oauth.py`)")
     logger.info("=" * 60)
