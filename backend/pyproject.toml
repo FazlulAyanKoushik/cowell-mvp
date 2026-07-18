@@ -17,6 +17,9 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
+    # AWS Lambda / serverless
+    "mangum>=0.17.0",
+    "boto3>=1.34.0",
 ]
 
 [project.optional-dependencies]

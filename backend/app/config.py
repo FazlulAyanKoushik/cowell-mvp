@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # Upload directory (for temp file storage)
     upload_dir: Path = Path(".")
 
+    # ── S3 / Serverless settings ─────────────────────────────────
+    # When set, the backend reads/writes session data from S3 instead of memory.
+    s3_bucket_sessions: str = ""
+    s3_bucket_uploads: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

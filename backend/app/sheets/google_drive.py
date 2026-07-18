@@ -43,9 +43,21 @@ def _get_credentials() -> Credentials:
     # Auto-refresh if expired
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        # Persist refreshed token so we don't refresh on every request
-        Path(token_path).write_text(creds.to_json())
-        logger.info("Refreshed OAuth access token and saved to %s", token_path)
+        # Persist the refreshed token so we don't refresh on every request.
+        # If the configured path is read-only (Docker :ro volume, Lambda /app),
+        # fall back to /tmp and update the settings path for subsequent reads.
+        try:
+            Path(token_path).write_text(creds.to_json())
+            logger.info("Refreshed OAuth access token and saved to %s", token_path)
+        except (OSError, PermissionError):
+            fallback = Path("/tmp/cowell_oauth_token.json")
+            fallback.write_text(creds.to_json())
+            # Update settings so next call reads from the writable path
+            settings.google_oauth_token_path = str(fallback)
+            logger.info(
+                "Could not write to %s (read-only). Saved to %s and updated path.",
+                token_path, fallback,
+            )
 
     return creds
 
