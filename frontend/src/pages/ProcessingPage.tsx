@@ -5,12 +5,13 @@
  */
 
 import { useEffect, useState, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { runOCR } from "../api/client";
 
 export function ProcessingPage() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
+  const uploadState = location.state as { surveyFiles?: File[]; instructions?: string } | null;
   const [status, setStatus] = useState<"converting" | "ocr" | "done" | "error">("converting");
   const [message, setMessage] = useState("PDF ページを画像に変換中...");
   const [progress, setProgress] = useState(0);
@@ -18,7 +19,12 @@ export function ProcessingPage() {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!sessionId) return;
+    const surveyFiles = uploadState?.surveyFiles;
+    const instructions = uploadState?.instructions ?? "";
+    if (!surveyFiles?.length) {
+      navigate("/", { replace: true });
+      return;
+    }
 
     // Simulate conversion progress
     const progressTimer = setInterval(() => {
@@ -32,7 +38,7 @@ export function ProcessingPage() {
       setMessage("Gemini に送信中...");
       setProgress(50);
 
-      runOCR(sessionId)
+      runOCR(surveyFiles, instructions)
         .then((result) => {
           setProgress(100);
           setStatus("done");
@@ -40,7 +46,7 @@ export function ProcessingPage() {
 
           // Navigate to edit page after brief pause
           setTimeout(() => {
-            navigate(`/edit/${sessionId}`);
+            navigate("/edit", { state: { rows: result.rows } });
           }, 1200);
         })
         .catch((err: any) => {
@@ -54,7 +60,7 @@ export function ProcessingPage() {
       clearInterval(progressTimer);
       clearTimeout(convertTimer);
     };
-  }, [sessionId, navigate]);
+  }, [uploadState, navigate]);
 
   return (
     <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>

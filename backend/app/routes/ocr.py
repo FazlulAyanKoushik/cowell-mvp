@@ -1,98 +1,77 @@
-"""OCR route — triggers Gemini extraction on uploaded files."""
+"""Single OCR route — receives files and returns extracted rows."""
 
 from __future__ import annotations
 
 import logging
+import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..config import settings
-from ..models import OCRResponse, SessionStatus
-from ..sessions.memory import get_session, update_session
-from ..ocr.image import pdf_to_images, compress_image
+from ..models import OCRResponse
 from ..ocr.gemini import extract_rows_from_images_async
+from ..ocr.image import compress_image, pdf_to_images
 
 logger = logging.getLogger("cowell.routes.ocr")
 router = APIRouter()
 
+ALLOWED_SURVEY_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_INSTRUCTION_CHARS = 50_000
 
-@router.post("/ocr/{session_id}", response_model=OCRResponse)
-async def run_ocr(session_id: str):
-    """Run Gemini OCR on all uploaded survey files in the session.
 
-    Converts PDFs to images, compresses images, batches them,
-    and sends to Gemini for structured JSON extraction.
-    """
-    session = get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if not session.survey_files:
-        raise HTTPException(status_code=400, detail="No survey files in session")
-
-    if session.status == SessionStatus.OCR_DONE:
-        # Already processed — return existing results
-        return OCRResponse(
-            session_id=session_id,
-            row_count=len(session.rows),
-            rows=session.rows,
-        )
-
-    # Mark as processing
-    session.status = SessionStatus.OCR_RUNNING
-    update_session(session)
+@router.post("/ocr", response_model=OCRResponse)
+async def run_ocr(
+    survey_files: list[UploadFile] = File(..., description="Survey PDFs or images"),
+    instructions: str = Form(default="", description="Optional OCR instructions"),
+):
+    """Extract rows from surveys in one request without creating a session."""
+    if not survey_files:
+        raise HTTPException(status_code=400, detail="At least one survey file is required")
 
     try:
-        # Convert all files to image bytes
         all_images: list[bytes] = []
+        max_size = settings.max_file_size_mb * 1024 * 1024
 
-        for file_path_str in session.survey_files:
-            file_path = Path(file_path_str)
+        for upload in survey_files:
+            filename = upload.filename or ""
+            suffix = Path(filename).suffix.lower()
+            if suffix not in ALLOWED_SURVEY_SUFFIXES:
+                raise HTTPException(status_code=400, detail=f"Unsupported survey file: {filename}")
 
-            if file_path.suffix.lower() == ".pdf":
-                # Convert PDF pages to images
-                images = pdf_to_images(file_path)
-                all_images.extend(images)
-            elif file_path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-                # Compress raw image
-                raw_bytes = file_path.read_bytes()
-                compressed = compress_image(raw_bytes)
-                all_images.append(compressed)
+            content = await upload.read()
+            if len(content) > max_size:
+                raise HTTPException(status_code=400, detail=f"File too large: {filename}")
+
+            if suffix == ".pdf":
+                with tempfile.NamedTemporaryFile(
+                    dir=settings.upload_dir, suffix=".pdf", delete=False
+                ) as temp_file:
+                    temp_file.write(content)
+                    temp_path = Path(temp_file.name)
+                try:
+                    all_images.extend(pdf_to_images(temp_path))
+                finally:
+                    temp_path.unlink(missing_ok=True)
             else:
-                logger.warning("Skipping unsupported file: %s", file_path.name)
+                all_images.append(compress_image(content))
 
         if not all_images:
             raise HTTPException(status_code=400, detail="No processable images found")
 
-        logger.info("Total images to process: %d", len(all_images))
+        if len(instructions) > MAX_INSTRUCTION_CHARS:
+            raise HTTPException(status_code=400, detail="Instructions are too long")
 
-        # Split into batches
         batch_size = settings.ocr_batch_size
-        batches = [
-            all_images[i:i + batch_size]
-            for i in range(0, len(all_images), batch_size)
-        ]
-        logger.info("Split into %d batches of up to %d images each", len(batches), batch_size)
+        batches = [all_images[i:i + batch_size] for i in range(0, len(all_images), batch_size)]
+        logger.info("Processing %d pages in %d Gemini batches", len(all_images), len(batches))
 
-        # Run OCR on all batches in parallel
-        rows = await extract_rows_from_images_async(batches)
-
-        # Update session
-        session.rows = rows
-        session.status = SessionStatus.OCR_DONE
-        update_session(session)
-
+        rows = await extract_rows_from_images_async(batches, instructions)
         logger.info("OCR complete: %d rows extracted", len(rows))
+        return OCRResponse(row_count=len(rows), rows=rows)
 
-        return OCRResponse(
-            session_id=session_id,
-            row_count=len(rows),
-            rows=rows,
-        )
-
-    except Exception as e:
-        session.status = SessionStatus.ERROR
-        session.error_message = str(e)
-        update_session(session)
-        raise HTTPException(status_code=500, detail=f"OCR failed: {e}") from e
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("OCR failed")
+        raise HTTPException(status_code=500, detail=f"OCR failed: {exc}") from exc

@@ -54,9 +54,9 @@ export default function App() {
 
         <Routes>
           <Route path="/" element={<UploadPage />} />
-          <Route path="/process/:sessionId" element={<ProcessingPage />} />
-          <Route path="/edit/:sessionId" element={<EditPage />} />
-          <Route path="/done/:sessionId" element={<DonePage />} />
+          <Route path="/process" element={<ProcessingPage />} />
+          <Route path="/edit" element={<EditPage />} />
+          <Route path="/done" element={<DonePage />} />
         </Routes>
       </div>
     </BrowserRouter>

@@ -159,6 +159,7 @@ backend/credentials/
 backend/uploads/
 frontend/dist/
 frontend/node_modules/
+*.tsbuildinfo
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

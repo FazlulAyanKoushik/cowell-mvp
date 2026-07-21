@@ -11,37 +11,9 @@ export interface SurveyRow {
   notes: string;
 }
 
-export type SessionStatus =
-  | "uploaded"
-  | "ocr_running"
-  | "ocr_done"
-  | "registering"
-  | "registered"
-  | "error";
-
-export interface UploadResponse {
-  session_id: string;
-  file_count: number;
-  photo_count: number;
-}
-
 export interface OCRResponse {
-  session_id: string;
   row_count: number;
   rows: SurveyRow[];
-}
-
-export interface RowsResponse {
-  session_id: string;
-  status: SessionStatus;
-  row_count: number;
-  rows: SurveyRow[];
-}
-
-export interface RegisterResponse {
-  session_id: string;
-  sheet_url: string;
-  row_count: number;
 }
 
 export interface HealthResponse {

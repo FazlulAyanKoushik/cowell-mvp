@@ -68,7 +68,6 @@ class UploadResponse(BaseModel):
 
 
 class OCRResponse(BaseModel):
-    session_id: str
     row_count: int
     rows: list[SurveyRow]
 

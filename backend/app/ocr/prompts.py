@@ -22,7 +22,7 @@ IMPORTANT RULES:
 8. Return ONLY the JSON array, no additional text or markdown formatting."""
 
 
-def build_ocr_prompt(page_numbers: list[int] | None = None) -> str:
+def build_ocr_prompt(page_numbers: list[int] | None = None, instructions: str = "") -> str:
     """Build the OCR extraction prompt for a batch of images.
 
     Args:
@@ -32,8 +32,18 @@ def build_ocr_prompt(page_numbers: list[int] | None = None) -> str:
     if page_numbers:
         page_hint = f"\nThese are pages {page_numbers[0]}-{page_numbers[-1]} of the document."
 
+    instruction_context = ""
+    if instructions.strip():
+        instruction_context = f"""
+
+Additional user instructions (follow them unless they conflict with the required JSON schema):
+---
+{instructions.strip()}
+---"""
+
     return f"""{SYSTEM_PROMPT}
 {page_hint}
+{instruction_context}
 Return a JSON array of row objects. Each object must have exactly these keys:
 - "floor": string (フロア)
 - "location": string (設置場所)
@@ -42,8 +52,8 @@ Return a JSON array of row objects. Each object must have exactly these keys:
 - "quantity": string (数量)
 - "notes": string (備考)
 
-If you see column headers or title rows, skip them — only extract data rows.
-If the form header contains a building/project name, include it as the first row with all fields empty except notes="{page_hint.strip() or 'header'}"."""
+If you see column headers, title rows, or a building/project name, skip them — only extract data rows.
+Return a complete, valid JSON array. Never leave a JSON object or string unfinished."""
 
 
 # JSON schema for structured output validation

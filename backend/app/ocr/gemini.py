@@ -60,6 +60,43 @@ def _parse_rows(raw_json: str) -> list[dict[str, str]]:
     return data
 
 
+def _recover_complete_rows(raw_json: str) -> list[dict[str, str]]:
+    """Recover complete objects from a JSON array cut off by the model.
+
+    This intentionally never guesses or repairs a partial final object. It only
+    returns objects that Python's JSON decoder can parse in full.
+    """
+    text = raw_json.strip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        text = text[first_newline + 1:] if first_newline != -1 else ""
+    start = text.find("[")
+    if start == -1:
+        return []
+
+    decoder = json.JSONDecoder()
+    index = start + 1
+    rows: list[dict[str, str]] = []
+
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index < len(text) and text[index] == ",":
+            index += 1
+            continue
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(value, dict):
+            break
+        rows.append(value)
+
+    return rows
+
+
 def extract_rows_from_images(
     image_batches: list[list[bytes]],
 ) -> list[SurveyRow]:
@@ -148,6 +185,7 @@ async def _process_batch_async(
     batch_idx: int,
     page_start: int,
     page_end: int,
+    instructions: str,
 ) -> list[dict[str, str]]:
     """Process a single batch asynchronously using Gemini's native async client.
 
@@ -162,45 +200,62 @@ async def _process_batch_async(
         List of raw row dicts from Gemini's response.
     """
     page_numbers = list(range(page_start, page_end + 1))
-    prompt = build_ocr_prompt(page_numbers)
-
-    parts: list[types.Part] = [
-        types.Part.from_text(text=prompt),
-    ]
-    for img_bytes in batch:
-        parts.append(
-            types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
-        )
-
     logger.info(
         "Processing batch %d (pages %d-%d, %d images) [async]",
         batch_idx + 1, page_start, page_end, len(batch),
     )
 
-    try:
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=[types.Content(role="user", parts=parts)],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                max_output_tokens=settings.gemini_max_output_tokens,
-                response_mime_type="application/json",
-                response_json_schema=ROW_JSON_SCHEMA,
-            ),
-        )
+    base_prompt = build_ocr_prompt(page_numbers, instructions)
+    recovered_rows: list[dict[str, str]] = []
 
-        raw_text = response.text or "[]"
-        logger.info("Gemini response received for batch %d (%d chars)", batch_idx + 1, len(raw_text))
+    for attempt in range(2):
+        retry_instruction = ""
+        if attempt:
+            retry_instruction = (
+                "\n\nYour previous response was incomplete. Return the entire result as a "
+                "complete, valid JSON array. Do not truncate an object or add any explanation."
+            )
+        parts: list[types.Part] = [types.Part.from_text(text=base_prompt + retry_instruction)]
+        parts.extend(types.Part.from_bytes(data=image, mime_type="image/jpeg") for image in batch)
+        raw_text = ""
 
-    except Exception as e:
-        logger.error("Gemini API call failed for batch %d: %s", batch_idx + 1, e)
-        raise RuntimeError(f"Gemini OCR failed on batch {batch_idx + 1}: {e}") from e
+        try:
+            response = await client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=[types.Content(role="user", parts=parts)],
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    max_output_tokens=settings.gemini_max_output_tokens,
+                    response_mime_type="application/json",
+                    response_json_schema=ROW_JSON_SCHEMA,
+                ),
+            )
+            raw_text = response.text or "[]"
+            logger.info(
+                "Gemini response received for batch %d, attempt %d (%d chars)",
+                batch_idx + 1, attempt + 1, len(raw_text),
+            )
+            return _parse_rows(raw_text)
+        except ValueError as exc:
+            recovered_rows = _recover_complete_rows(raw_text)
+            logger.warning(
+                "Batch %d returned malformed JSON on attempt %d; recovered %d complete rows",
+                batch_idx + 1, attempt + 1, len(recovered_rows),
+            )
+            if attempt == 1:
+                if recovered_rows:
+                    return recovered_rows
+                raise RuntimeError(f"Gemini returned invalid JSON: {exc}") from exc
+        except Exception as exc:
+            logger.error("Gemini API call failed for batch %d: %s", batch_idx + 1, exc)
+            raise RuntimeError(f"Gemini OCR failed on batch {batch_idx + 1}: {exc}") from exc
 
-    return _parse_rows(raw_text)
+    raise RuntimeError(f"Gemini OCR failed on batch {batch_idx + 1}")
 
 
 async def extract_rows_from_images_async(
     image_batches: list[list[bytes]],
+    instructions: str = "",
 ) -> list[SurveyRow]:
     """Run OCR on batches of images in parallel and return merged SurveyRow list.
 
@@ -222,7 +277,7 @@ async def extract_rows_from_images_async(
         page_end = page_start + len(batch) - 1
 
         tasks.append(
-            _process_batch_async(client, batch, batch_idx, page_start, page_end)
+            _process_batch_async(client, batch, batch_idx, page_start, page_end, instructions)
         )
 
     # Run all batches in parallel

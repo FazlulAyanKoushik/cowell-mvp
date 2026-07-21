@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routes import upload, ocr, rows, register
+from .routes import ocr
 
 # ── Logging configuration ──────────────────────────────────────────────
 logging.basicConfig(
@@ -32,10 +32,7 @@ app.add_middleware(
 )
 
 # Mount route modules
-app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(ocr.router, prefix="/api", tags=["ocr"])
-app.include_router(rows.router, prefix="/api", tags=["rows"])
-app.include_router(register.router, prefix="/api", tags=["register"])
 
 
 @app.get("/api/health")
@@ -49,10 +46,5 @@ def startup_log():
     logger.info("Cowell OCR API starting up")
     logger.info("  Gemini model:    %s", settings.gemini_model)
     logger.info("  Upload dir:      %s", settings.upload_dir)
-    logger.info("  OAuth token:     %s", settings.google_oauth_token_path)
-    logger.info("  Target folder:   %s", settings.google_oauth_target_folder_id or "(root of My Drive)")
     logger.info("  Gemini API key:  %s", "SET" if settings.gemini_api_key else "MISSING ⚠️")
-    from pathlib import Path
-    token_exists = Path(settings.google_oauth_token_path).exists()
-    logger.info("  Token exists:    %s", "YES ✅" if token_exists else "NO ❌ (run `python auth_oauth.py`)")
     logger.info("=" * 60)

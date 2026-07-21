@@ -9,17 +9,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileUploadZone } from "../components/FileUploadZone";
-import { uploadFiles } from "../api/client";
+
+const DEFAULT_LLM_INSTRUCTIONS = `Extract every visible fixture inventory row. Carefully carry values through merged cells and ditto marks. Preserve handwritten text exactly; use notes for uncertainty.`;
 
 export function UploadPage() {
   const navigate = useNavigate();
   const [surveyFiles, setSurveyFiles] = useState<File[]>([]);
-  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [instructions, setInstructions] = useState(DEFAULT_LLM_INSTRUCTIONS);
   const [error, setError] = useState<string | null>(null);
 
   const totalSizeKB =
-    [...surveyFiles, ...photoFiles].reduce((sum, f) => sum + f.size, 0) / 1024;
+    surveyFiles.reduce((sum, f) => sum + f.size, 0) / 1024;
 
   const handleRunOCR = async () => {
     if (!surveyFiles.length) {
@@ -27,22 +27,8 @@ export function UploadPage() {
       return;
     }
 
-    setLoading(true);
     setError(null);
-
-    try {
-      const result = await uploadFiles(surveyFiles, photoFiles);
-      // Navigate to processing page with session info
-      navigate(`/process/${result.session_id}`, {
-        state: {
-          fileCount: result.file_count,
-          photoCount: result.photo_count,
-        },
-      });
-    } catch (err: any) {
-      setError(err.message || "Upload failed");
-      setLoading(false);
-    }
+    navigate("/process", { state: { surveyFiles, instructions } });
   };
 
   return (
@@ -55,17 +41,23 @@ export function UploadPage() {
         onFilesChange={setSurveyFiles}
       />
 
-      <FileUploadZone
-        label="現場写真（任意）"
-        accept=".jpg,.jpeg,.png,.webp"
-        hint="後で行に紐付ける写真をまとめてアップロード"
-        files={photoFiles}
-        onFilesChange={setPhotoFiles}
-      />
+      <div className="card">
+        <label htmlFor="llm-instructions" style={{ display: "block", fontWeight: 700, marginBottom: 8 }}>
+          Additional instructions for LLM (optional)
+        </label>
+        <textarea
+          id="llm-instructions"
+          className="cell-input"
+          value={instructions}
+          onChange={(event) => setInstructions(event.target.value)}
+          rows={4}
+          style={{ width: "100%", resize: "vertical" }}
+        />
+      </div>
 
       {totalSizeKB > 0 && (
         <div className="card" style={{ fontSize: "0.85rem", color: "#999", textAlign: "center" }}>
-          送信データ: 約 {totalSizeKB.toFixed(0)} KB（{surveyFiles.length + photoFiles.length} ファイル）
+          送信データ: 約 {totalSizeKB.toFixed(0)} KB（{surveyFiles.length} ファイル）
         </div>
       )}
 
@@ -75,16 +67,10 @@ export function UploadPage() {
 
       <button
         className="btn btn-primary"
-        disabled={!surveyFiles.length || loading}
+        disabled={!surveyFiles.length}
         onClick={handleRunOCR}
       >
-        {loading ? (
-          <>
-            <div className="spinner" /> アップロード中...
-          </>
-        ) : (
-          `OCR を実行（${surveyFiles.length} ファイル）`
-        )}
+        {`OCR を実行（${surveyFiles.length} ファイル）`}
       </button>
     </div>
   );
