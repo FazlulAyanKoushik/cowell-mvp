@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 20
 
     # Gemini
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     gemini_max_output_tokens: int = 32768
     ocr_batch_size: int = 8  # pages per Gemini API call
 

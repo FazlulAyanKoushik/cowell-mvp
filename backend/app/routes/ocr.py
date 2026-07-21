@@ -11,7 +11,7 @@ from ..config import settings
 from ..models import OCRResponse, SessionStatus
 from ..sessions.memory import get_session, update_session
 from ..ocr.image import pdf_to_images, compress_image
-from ..ocr.gemini import extract_rows_from_images
+from ..ocr.gemini import extract_rows_from_images_async
 
 logger = logging.getLogger("cowell.routes.ocr")
 router = APIRouter()
@@ -75,8 +75,8 @@ async def run_ocr(session_id: str):
         ]
         logger.info("Split into %d batches of up to %d images each", len(batches), batch_size)
 
-        # Run OCR on all batches
-        rows = extract_rows_from_images(batches)
+        # Run OCR on all batches in parallel
+        rows = await extract_rows_from_images_async(batches)
 
         # Update session
         session.rows = rows
